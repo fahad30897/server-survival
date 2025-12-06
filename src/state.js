@@ -18,7 +18,7 @@ const STATE = {
 
     lastTime: 0,
     spawnTimer: 0,
-    currentRPS: 0.5,
+    currentRPS: 2,
     timeScale: 1,
     isRunning: true,
     animationId: null,
@@ -52,5 +52,6 @@ const STATE = {
     elapsedGameTime: 0,
     fraudSpikeTimer: 0,
     fraudSpikeActive: false,
+    lastSpikeFraud: 0,
     normalTrafficDist: null
 };

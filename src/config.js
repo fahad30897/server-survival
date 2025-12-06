@@ -80,7 +80,7 @@ const CONFIG = {
     },
     survival: {
         startBudget: 400,
-        baseRPS: 0.5,
+        baseRPS: 2,
         rampUp: 0.015,
         maxRPS: 25,
         trafficDistribution: {

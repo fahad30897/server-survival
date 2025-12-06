@@ -7,6 +7,8 @@ class Service {
         this.queue = [];
         this.processing = [];
         this.connections = [];
+        this.lastDownTime = -(Math.floor(Math.random() * (101)) + 200); // 200-300s until first possible downtime
+        this.isDown = false;
 
         let geo, mat;
         const materialProps = { roughness: 0.2 };
@@ -83,6 +85,35 @@ class Service {
         }
 
         serviceGroup.add(this.mesh);
+    }
+
+        setIsDown(dt) {
+        if (this.type === 'compute') {
+            // Only compute services can go down
+            this.lastDownTime += dt;
+            if (this.lastDownTime < 0) {
+                return;
+            }
+            if (!this.isDown) {
+                const xMin = 0;
+                const p0 = 0.05;      // 5% at start
+                const k  = 0.01;     // growth per unit x
+                let p = p0 + k * (this.lastDownTime - xMin);
+                if (p < 0) p = 0;
+                if (p > 1) p = 1;
+                if (Math.random() < p) {
+                    this.lastDownTime = 0;
+                    this.isDown = true;
+                    this.mesh.material.color.setHex(0xff0000); // down
+                }
+                return;
+            }
+            if (this.lastDownTime > 10) {
+                this.isDown = false;
+                this.mesh.material.color.setHex(CONFIG.colors.compute); // back up
+                this.lastDownTime = -200; // next downtime in up to 60s
+            }
+        }
     }
 
     upgrade() {
@@ -225,7 +256,7 @@ class Service {
 
                         // Check if target can accept (has queue space)
                         const targetMaxQueue = target.config.maxQueueSize || 20;
-                        if (target.queue.length < targetMaxQueue) {
+                        if (target.queue.length < targetMaxQueue && target.isDown === false) {
                             job.req.flyTo(target);
                             sent = true;
                             break;
@@ -235,7 +266,7 @@ class Service {
                     if (!sent) {
                         // All downstream busy - put back in OUR queue
                         this.queue.unshift(job.req);
-                        this.processing.splice(i, 1);
+                        // this.processing.splice(i, 1);
                         break; // Don't process more this frame
                     }
                     continue;
@@ -273,7 +304,7 @@ class Service {
                     // Round Robin Load Balancing
                     const candidates = this.connections
                         .map(id => STATE.services.find(s => s.id === id))
-                        .filter(s => s !== undefined);
+                        .filter(s => s !== undefined && !s.isDown);
 
                     if (candidates.length > 0) {
                         const target = candidates[this.rrIndex % candidates.length];
@@ -285,6 +316,8 @@ class Service {
                 }
             }
         }
+
+        this.setIsDown(dt);
 
         if (this.totalLoad > 0.8) {
             this.loadRing.material.color.setHex(0xff0000);
