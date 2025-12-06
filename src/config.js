@@ -22,17 +22,10 @@ const CONFIG = {
     },
     internetNodeStartPos: { x: -40, y: 0, z: 0 },
     services: {
-        waf: {
-            name: "Firewall", cost: 40, type: 'waf', processingTime: 20, capacity: 100, upkeep: 6,
-            tooltip: { upkeep: "Low", desc: "<b>Firewall.</b> The first line of defense. Blocks Fraud traffic." }
-        },
-        alb: {
-            name: "Load Balancer", cost: 50, type: 'alb', processingTime: 50, capacity: 50, upkeep: 10,
-            tooltip: { upkeep: "Medium", desc: "<b>Load Balancer.</b> Distributes traffic to multiple Compute instances." }
-        },
+        waf: { name: "WAF Firewall", cost: 40, type: 'waf', processingTime: 20, capacity: 100, upkeep: 6 },
+        alb: { name: "Load Balancer", cost: 50, type: 'alb', processingTime: 50, capacity: 50, upkeep: 10 },
         compute: {
-            name: "Compute", cost: 80, type: 'compute', processingTime: 600, capacity: 4, upkeep: 18,
-            tooltip: { upkeep: "High", desc: "<b>Compute Node.</b> Processes requests. <b>Upgradeable (Tiers 1-3).</b>" },
+            name: "EC2 Compute", cost: 80, type: 'compute', processingTime: 600, capacity: 4, upkeep: 18,
             tiers: [
                 { level: 1, capacity: 4, cost: 0 },
                 { level: 2, capacity: 10, cost: 120 },
@@ -40,26 +33,21 @@ const CONFIG = {
             ]
         },
         db: {
-            name: "Relational DB", cost: 180, type: 'db', processingTime: 300, capacity: 8, upkeep: 36,
-            tooltip: { upkeep: "Very High", desc: "<b>SQL Database.</b> Destination for API traffic. <b>Upgradeable (Tiers 1-3).</b>" },
+            name: "RDS Database", cost: 180, type: 'db', processingTime: 300, capacity: 8, upkeep: 36,
             tiers: [
                 { level: 1, capacity: 8, cost: 0 },
                 { level: 2, capacity: 20, cost: 250 },
                 { level: 3, capacity: 35, cost: 400 }
             ]
         },
-        s3: {
-            name: "File Storage", cost: 30, type: 's3', processingTime: 200, capacity: 100, upkeep: 8,
-            tooltip: { upkeep: "Low", desc: "<b>Storage.</b> Destination for Web traffic." }
-        },
+        s3: { name: "S3 Storage", cost: 30, type: 's3', processingTime: 200, capacity: 100, upkeep: 8 },
         cache: {
-            name: "Memory Cache",
+            name: "ElastiCache",
             cost: 75,
             type: 'cache',
             processingTime: 50,
             capacity: 30,
             upkeep: 10,
-            tooltip: { upkeep: "Medium", desc: "<b>Memory Cache.</b> Caches responses to reduce DB load." },
             cacheHitRate: 0.35,
             tiers: [
                 { level: 1, capacity: 30, cacheHitRate: 0.35, cost: 0 },
@@ -68,19 +56,18 @@ const CONFIG = {
             ]
         },
         sqs: {
-            name: "Message Queue",
+            name: "SQS Queue",
             cost: 40,
             type: 'sqs',
             processingTime: 100,
             capacity: 10,
             maxQueueSize: 200,
-            upkeep: 3,
-            tooltip: { upkeep: "Low", desc: "<b>Queue.</b> Buffers requests during spikes. Prevents drops." }
+            upkeep: 3
         }
     },
     survival: {
         startBudget: 400,
-        baseRPS: 0.5,
+        baseRPS: 2,
         rampUp: 0.015,
         maxRPS: 25,
         trafficDistribution: {

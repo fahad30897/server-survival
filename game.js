@@ -6,7 +6,7 @@ function calculateTargetRPS(gameTimeSeconds) {
     // Logarithmic curve: fast growth early, plateaus later
     // At 0s: 0.5, at 60s: ~2.5, at 180s: ~4, at 300s: ~5, at 600s: ~6.5
     const base = CONFIG.survival.baseRPS;
-    const growth = Math.log(1 + gameTimeSeconds / 30) * 1.8;
+    const growth = Math.log(1 + gameTimeSeconds / 30) * 2;
     return base + growth;
 }
 
@@ -14,8 +14,7 @@ function getUpkeepMultiplier() {
     if (STATE.gameMode !== 'survival') return 1.0;
     if (!CONFIG.survival.upkeepScaling.enabled) return 1.0;
 
-    // Use simulated elapsed time so timeScale affects upkeep ramp
-    const gameTime = STATE.elapsedGameTime ?? ((performance.now() - STATE.gameStartTime) / 1000);
+    const gameTime = (performance.now() - STATE.gameStartTime) / 1000;
     const progress = Math.min(gameTime / CONFIG.survival.upkeepScaling.scaleTime, 1.0);
 
     const base = CONFIG.survival.upkeepScaling.baseMultiplier;
@@ -54,16 +53,15 @@ function updateFraudSpike(dt) {
 }
 
 function showFraudWarning() {
-    const existing = document.getElementById('fraud-warning');
-    if (existing) existing.remove();
-
     // Visual warning
     const warning = document.createElement('div');
     warning.id = 'fraud-warning';
     warning.className = 'fixed top-1/3 left-1/2 transform -translate-x-1/2 text-center z-50 pointer-events-none';
+    const spikeText = STATE.lastSpikeFraud === 0 ? 'DDoS INCOMING' : 'WEB FLOOD INCOMING';
+    const spikeMessage = STATE.lastSpikeFraud === 0 ? 'Prepare your defenses!' : 'Expect high web traffic!';
     warning.innerHTML = `
-        <div class="text-red-500 text-2xl font-bold animate-pulse">⚠️ DDoS INCOMING ⚠️</div>
-        <div class="text-red-300 text-sm">Fraud spike in 5 seconds!</div>
+        <div class="text-red-500 text-2xl font-bold animate-pulse">⚠️ ${spikeText} ⚠️</div>
+        <div class="text-red-300 text-sm"> ${spikeMessage} in 5 seconds!</div>
     `;
     document.body.appendChild(warning);
 
@@ -74,30 +72,36 @@ function showFraudWarning() {
 }
 
 function startFraudSpike() {
-    const existing = document.getElementById('fraud-spike-indicator');
-    if (existing) existing.remove();
-
     STATE.fraudSpikeActive = true;
 
     // Store normal distribution
     STATE.normalTrafficDist = { ...STATE.trafficDistribution };
 
     // Apply spike distribution
-    const fraudPct = CONFIG.survival.fraudSpike.fraudPercent;
-    const remaining = 1 - fraudPct;
-    STATE.trafficDistribution = {
-        WEB: remaining * 0.5,
-        API: remaining * 0.5,
-        FRAUD: fraudPct
-    };
+    if (STATE.lastSpikeFraud === 0) {
+        const fraudPct = CONFIG.survival.fraudSpike.fraudPercent;
+        const remaining = 1 - fraudPct;
+        STATE.trafficDistribution = {
+            WEB: remaining * 0.5,
+            API: remaining * 0.5,
+            FRAUD: fraudPct
+        };
+    } else {
+        STATE.trafficDistribution = {
+            WEB: 0.15,
+            API: 0.80,
+            FRAUD: 0.05
+        }
+    }
 
     // Visual indicator
+    const spikeType = STATE.lastSpikeFraud === 0 ? 'DDoS ATTACK ACTIVE' : 'WEB FLOOD ACTIVE';
     const indicator = document.createElement('div');
     indicator.id = 'fraud-spike-indicator';
     indicator.className = 'fixed top-4 left-1/2 transform -translate-x-1/2 z-40 pointer-events-none';
     indicator.innerHTML = `
         <div class="bg-red-900/80 border-2 border-red-500 rounded-lg px-4 py-2 animate-pulse">
-            <span class="text-red-400 font-bold">🔥 DDoS ATTACK ACTIVE 🔥</span>
+            <span class="text-red-400 font-bold">🔥 ${spikeType} 🔥</span>
         </div>
     `;
     document.body.appendChild(indicator);
@@ -123,7 +127,7 @@ function endFraudSpike() {
     // Reset mix display styling
     const fraudEl = document.getElementById('mix-fraud');
     if (fraudEl) fraudEl.className = 'text-purple-400';
-
+    STATE.lastSpikeFraud = 1 - STATE.lastSpikeFraud;
     STATE.sound.playSuccess();
 }
 
@@ -217,7 +221,7 @@ function resetGame(mode = 'survival') {
         STATE.money = CONFIG.survival.startBudget;
         STATE.upkeepEnabled = true;
         STATE.trafficDistribution = { ...CONFIG.survival.trafficDistribution };
-        STATE.currentRPS = 0.5;
+        STATE.currentRPS = 2;
     }
 
     STATE.reputation = 100;
@@ -232,7 +236,6 @@ function resetGame(mode = 'survival') {
     STATE.spawnTimer = 0;
 
     // Initialize balance overhaul state
-    STATE.elapsedGameTime = 0;
     STATE.gameStartTime = performance.now();
     STATE.fraudSpikeTimer = 0;
     STATE.fraudSpikeActive = false;
@@ -269,10 +272,7 @@ function resetGame(mode = 'survival') {
     // Reset UI
     document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('btn-pause').classList.add('active');
-    // Only add pulse-green if tutorial is not active
-    if (!window.tutorial?.isActive) {
-        document.getElementById('btn-play').classList.add('pulse-green');
-    }
+    document.getElementById('btn-play').classList.add('pulse-green');
 
     // Update UI displays
     updateScoreUI();
@@ -485,13 +485,6 @@ window.closeFAQ = () => {
 window.startGame = () => {
     document.getElementById('main-menu-modal').classList.add('hidden');
     resetGame();
-
-    // Start tutorial for new players in survival mode
-    if (window.tutorial && !window.tutorial.isCompleted()) {
-        setTimeout(() => {
-            window.tutorial.start();
-        }, 500);
-    }
 };
 
 window.startSandbox = () => {
@@ -505,11 +498,6 @@ function createService(type, pos) {
     STATE.money -= CONFIG.services[type].cost;
     STATE.services.push(new Service(type, pos));
     STATE.sound.playPlace();
-
-    // Notify tutorial
-    if (window.tutorial?.isActive) {
-        window.tutorial.onAction('place', { type });
-    }
 }
 
 function restoreService(serviceData, pos) {
@@ -555,15 +543,6 @@ function createConnection(fromId, toId) {
     connectionGroup.add(line);
     STATE.connections.push({ from: fromId, to: toId, mesh: line });
     STATE.sound.playConnect();
-
-    // Notify tutorial
-    if (window.tutorial?.isActive) {
-        window.tutorial.onAction('connect', {
-            from: fromId,
-            fromType: t1,
-            toType: t2
-        });
-    }
 }
 
 function deleteConnection(fromId, toId) {
@@ -666,18 +645,10 @@ window.setTimeScale = (s) => {
 
     if (s === 0) {
         document.getElementById('btn-pause').classList.add('active');
-        // Only add pulse-green if tutorial is not active
-        if (!window.tutorial?.isActive) {
-            document.getElementById('btn-play').classList.add('pulse-green');
-        }
+        document.getElementById('btn-play').classList.add('pulse-green');
     } else if (s === 1) {
         document.getElementById('btn-play').classList.add('active');
         document.getElementById('btn-play').classList.remove('pulse-green');
-
-        // Notify tutorial when game starts
-        if (window.tutorial?.isActive) {
-            window.tutorial.onAction('start_game');
-        }
     } else if (s === 3) {
         document.getElementById('btn-fast').classList.add('active');
         document.getElementById('btn-play').classList.remove('pulse-green');
@@ -724,10 +695,9 @@ container.addEventListener('mousedown', (e) => {
     const i = getIntersect(e.clientX, e.clientY);
     if (STATE.activeTool === 'select') {
         const i = getIntersect(e.clientX, e.clientY);
-        if (i.type === 'service') { draggedNode = STATE.services.find(s => s.id === i.id); }
+        if (i.type === 'service') { draggedNode = STATE.services.find(s => s.id === i.id); } 
         else if (i.type === 'internet') { draggedNode = STATE.internetNode; }
-        if (draggedNode) {
-            isDraggingNode = true;
+        if (draggedNode) { isDraggingNode = true;
             const hit = getIntersect(e.clientX, e.clientY);
             if (hit.pos) { dragOffset.copy(draggedNode.position).sub(hit.pos); }
             container.style.cursor = 'grabbing';
@@ -754,8 +724,8 @@ container.addEventListener('mousedown', (e) => {
             (STATE.activeTool === 'cache' && i.type === 'service')) {
             const svc = STATE.services.find(s => s.id === i.id);
             if (svc && ((STATE.activeTool === 'lambda' && svc.type === 'compute') ||
-                (STATE.activeTool === 'db' && svc.type === 'db') ||
-                (STATE.activeTool === 'cache' && svc.type === 'cache'))) {
+                        (STATE.activeTool === 'db' && svc.type === 'db') ||
+                        (STATE.activeTool === 'cache' && svc.type === 'cache'))) {
                 svc.upgrade();
                 return;
             }
@@ -804,21 +774,21 @@ container.addEventListener('mousemove', (e) => {
         const dx = e.clientX - lastMouseX;
         const dy = e.clientY - lastMouseY;
 
-        const panX = -dx * (camera.right - camera.left) / window.innerWidth * panSpeed;
-        const panY = dy * (camera.top - camera.bottom) / window.innerHeight * panSpeed;
+    const panX = -dx * (camera.right - camera.left) / window.innerWidth * panSpeed;
+    const panY = dy * (camera.top - camera.bottom) / window.innerHeight * panSpeed;
 
-        if (isIsometric) {
-            camera.position.x += panX;
-            camera.position.z += panY;
-            cameraTarget.x += panX;
-            cameraTarget.z += panY;
-            camera.lookAt(cameraTarget);
-        } else {
-            camera.position.x += panX;
-            camera.position.z += panY;
-            camera.lookAt(camera.position.x, 0, camera.position.z);
-        }
-        camera.updateProjectionMatrix(); lastMouseX = e.clientX;
+    if (isIsometric) {
+        camera.position.x += panX;
+        camera.position.z += panY;
+        cameraTarget.x += panX;
+        cameraTarget.z += panY;
+        camera.lookAt(cameraTarget);
+    } else {
+        camera.position.x += panX;
+        camera.position.z += panY;
+        camera.lookAt(camera.position.x, 0, camera.position.z);
+    }
+    camera.updateProjectionMatrix();        lastMouseX = e.clientX;
         lastMouseY = e.clientY;
         document.getElementById('tooltip').style.display = 'none';
         return;
@@ -851,11 +821,12 @@ container.addEventListener('mousemove', (e) => {
             const fromName = conn.from === 'internet' ? 'Internet' : (from?.config?.name || 'Unknown');
             const toName = conn.to === 'internet' ? 'Internet' : (to?.config?.name || 'Unknown');
 
-            showTooltip(e.clientX + 15, e.clientY + 15,
-                `<strong class="text-orange-400">Remove Link</strong><br>
-                <span class="text-gray-300">${fromName}</span> → <span class="text-gray-300">${toName}</span><br>
-                <span class="text-red-400 text-xs">Click to remove</span>`
-            );
+            t.style.display = 'block';
+            t.style.left = e.clientX + 15 + 'px';
+            t.style.top = e.clientY + 15 + 'px';
+            t.innerHTML = `<strong class="text-orange-400">Remove Link</strong><br>
+            <span class="text-gray-300">${fromName}</span> → <span class="text-gray-300">${toName}</span><br>
+            <span class="text-red-400 text-xs">Click to remove</span>`;
         } else {
             t.style.display = 'none';
         }
@@ -866,25 +837,16 @@ container.addEventListener('mousemove', (e) => {
     if (i.type === 'service') {
         const s = STATE.services.find(s => s.id === i.id);
         if (s) {
+            t.style.display = 'block'; t.style.left = e.clientX + 15 + 'px'; t.style.top = e.clientY + 15 + 'px';
+
             const load = s.processing.length / s.config.capacity;
             let loadColor = load > 0.8 ? 'text-red-400' : (load > 0.4 ? 'text-yellow-400' : 'text-green-400');
 
-            // Base tooltip content with static info
-            let content = `<strong class="text-blue-300">${s.config.name}</strong>`;
-            if (s.tier) content += ` <span class="text-xs text-yellow-400">T${s.tier}</span>`;
-
-            // Add static description and upkeep if available
-            if (s.config.tooltip) {
-                content += `<br><span class="text-xs text-gray-400">${s.config.tooltip.desc}</span>`;
-                content += `<br><span class="text-xs text-gray-500">Upkeep: <span class="text-gray-300">${s.config.tooltip.upkeep}</span></span>`;
-            }
-
-            content += `<div class="mt-1 border-t border-gray-700 pt-1">`;
-
-            // Service-specific dynamic stats
+            // Service-specific tooltips
             if (s.type === 'cache') {
                 const hitRate = Math.round((s.config.cacheHitRate || 0.35) * 100);
-                content += `Queue: <span class="${loadColor}">${s.queue.length}</span><br>
+                t.innerHTML = `<strong class="text-red-400">${s.config.name}</strong> <span class="text-xs text-yellow-400">T${s.tier || 1}</span><br>
+                Queue: <span class="${loadColor}">${s.queue.length}</span><br>
                 Load: <span class="${loadColor}">${s.processing.length}/${s.config.capacity}</span><br>
                 Hit Rate: <span class="text-green-400">${hitRate}%</span>`;
             } else if (s.type === 'sqs') {
@@ -892,14 +854,20 @@ container.addEventListener('mousemove', (e) => {
                 const fillPercent = Math.round((s.queue.length / maxQ) * 100);
                 const status = fillPercent > 80 ? 'Critical' : (fillPercent > 50 ? 'Busy' : 'Healthy');
                 const statusColor = fillPercent > 80 ? 'text-red-400' : (fillPercent > 50 ? 'text-yellow-400' : 'text-green-400');
-                content += `Buffered: <span class="${loadColor}">${s.queue.length}/${maxQ}</span><br>
+                t.innerHTML = `<strong class="text-orange-400">${s.config.name}</strong><br>
+                Buffered: <span class="${loadColor}">${s.queue.length}/${maxQ}</span><br>
                 Processing: ${s.processing.length}/${s.config.capacity}<br>
                 Status: <span class="${statusColor}">${status}</span>`;
             } else {
-                content += `Queue: <span class="${loadColor}">${s.queue.length}</span><br>
+                t.innerHTML = `<strong class="text-blue-300">${s.config.name}</strong> <span class="text-xs text-yellow-400">T${s.tier || 1}</span><br>
+                Queue: <span class="${loadColor}">${s.queue.length}</span><br>
                 Load: <span class="${loadColor}">${s.processing.length}/${s.config.capacity}</span>`;
             }
-            content += `</div>`;
+
+            // Reset previous highlights
+            STATE.services.forEach(svc => {
+                if (svc.mesh.material.emissive) svc.mesh.material.emissive.setHex(0x000000);
+            });
 
             // Show upgrade option for upgradeable services
             if ((STATE.activeTool === 'lambda' && s.type === 'compute') ||
@@ -909,19 +877,13 @@ container.addEventListener('mousemove', (e) => {
                 if (s.tier < tiers.length) {
                     cursor = 'pointer';
                     const nextCost = tiers[s.tier].cost;
-                    content += `<div class="mt-1 pt-1 border-t border-gray-700"><span class="text-green-300 text-xs font-bold">Upgrade: $${nextCost}</span></div>`;
+                    t.innerHTML += `<br><span class="text-green-300 text-xs font-bold">Upgrade: $${nextCost}</span>`;
+
                     if (s.mesh.material.emissive) s.mesh.material.emissive.setHex(0x333333);
                 } else {
-                    content += `<div class="mt-1 pt-1 border-t border-gray-700"><span class="text-gray-500 text-xs">Max Tier</span></div>`;
+                    t.innerHTML += `<br><span class="text-gray-500 text-xs">Max Tier</span>`;
                 }
             }
-
-            showTooltip(e.clientX + 15, e.clientY + 15, content);
-
-            // Reset previous highlights
-            STATE.services.forEach(svc => {
-                if (svc !== s && svc.mesh.material.emissive) svc.mesh.material.emissive.setHex(0x000000);
-            });
         }
     } else {
         t.style.display = 'none';
@@ -933,48 +895,6 @@ container.addEventListener('mousemove', (e) => {
 
     container.style.cursor = cursor;
 });
-
-// Helper function for showing tooltips
-function showTooltip(x, y, html) {
-    const t = document.getElementById('tooltip');
-    t.style.display = 'block';
-    t.style.left = x + 'px';
-    t.style.top = y + 'px';
-    t.innerHTML = html;
-}
-
-// Setup UI tooltips
-function setupUITooltips() {
-    const tools = ['waf', 'sqs', 'alb', 'lambda', 'db', 'cache', 's3'];
-    tools.forEach(toolId => {
-        const btn = document.getElementById(`tool-${toolId}`);
-        if (!btn) return;
-
-        // Map tool ID to config service key
-        const serviceKey = toolId === 'lambda' ? 'compute' : toolId;
-        const config = CONFIG.services[serviceKey];
-
-        if (config && config.tooltip) {
-            btn.addEventListener('mousemove', (e) => {
-                const content = `
-                    <strong class="text-blue-300">${config.name}</strong> <span class="text-green-400">$${config.cost}</span><br>
-                    <span class="text-xs text-gray-400">${config.tooltip.desc}</span><br>
-                    <div class="mt-1 pt-1 border-t border-gray-700 flex justify-between text-xs">
-                        <span class="text-gray-500">Upkeep: <span class="text-gray-300">${config.tooltip.upkeep}</span></span>
-                    </div>
-                `;
-                showTooltip(e.clientX + 15, e.clientY - 100, content); // Show above the button
-            });
-
-            btn.addEventListener('mouseleave', () => {
-                document.getElementById('tooltip').style.display = 'none';
-            });
-        }
-    });
-}
-
-// Call setup
-setupUITooltips();
 
 container.addEventListener('mouseup', (e) => {
     if (e.button === 2 || e.button === 1) {
@@ -1029,13 +949,8 @@ function animate(time) {
     STATE.animationId = requestAnimationFrame(animate);
     if (!STATE.isRunning) return;
 
-    // Limit dt to prevent huge jumps when tab loses focus
-    // (requestAnimationFrame pauses when tab is inactive)
-    const rawDt = (time - STATE.lastTime) / 1000;
-    const clampedDt = Math.min(rawDt, 0.1); // Max 100ms per frame
-    const dt = clampedDt * STATE.timeScale;
+    const dt = ((time - STATE.lastTime) / 1000) * STATE.timeScale;
     STATE.lastTime = time;
-    STATE.elapsedGameTime += dt;
 
     STATE.services.forEach(s => s.update(dt));
     STATE.requests.forEach(r => r.update(dt));
@@ -1046,7 +961,7 @@ function animate(time) {
         spawnRequest();
         // Only ramp up in survival mode - use logarithmic growth
         if (STATE.gameMode === 'survival') {
-            const gameTime = STATE.elapsedGameTime;
+            const gameTime = (performance.now() - STATE.gameStartTime) / 1000;
             const targetRPS = calculateTargetRPS(gameTime);
 
             // Smooth transition to target
@@ -1244,11 +1159,6 @@ function openMainMenu() {
     STATE.previousTimeScale = STATE.timeScale;
     setTimeScale(0);
 
-    // Hide tutorial while menu is open
-    if (window.tutorial?.isActive) {
-        window.tutorial.hide();
-    }
-
     // Show resume button if game is active
     const resumeBtn = document.getElementById('resume-btn');
     if (resumeBtn) {
@@ -1275,11 +1185,6 @@ window.resumeGame = () => {
     // Hide main menu, keep game paused
     document.getElementById('main-menu-modal').classList.add('hidden');
     STATE.sound.playGameBGM();
-
-    // Restore tutorial if active
-    if (window.tutorial?.isActive) {
-        window.tutorial.show();
-    }
 };
 
 // ==================== SAVE/LOAD FUNCTIONS ====================
@@ -1348,9 +1253,7 @@ window.loadGameState = () => {
         STATE.spawnTimer = saveData.spawnTimer || 0;
         STATE.currentRPS = saveData.currentRPS || 0.5;
         STATE.timeScale = saveData.timeScale || 0; // Start paused
-        STATE.elapsedGameTime = saveData.elapsedGameTime ?? 0;
         STATE.isRunning = saveData.isRunning || false;
-        STATE.gameStartTime = performance.now();
 
         STATE.gameMode = saveData.gameMode || 'survival';
         STATE.sandboxBudget = saveData.sandboxBudget || 2000;
