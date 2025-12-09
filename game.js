@@ -6,7 +6,7 @@ function calculateTargetRPS(gameTimeSeconds) {
     // Logarithmic curve: fast growth early, plateaus later
     // At 0s: 0.5, at 60s: ~2.5, at 180s: ~4, at 300s: ~5, at 600s: ~6.5
     const base = CONFIG.survival.baseRPS;
-    const growth = Math.log(1 + gameTimeSeconds / 30) * 1.8;
+    const growth = Math.log(1 + gameTimeSeconds / 30) * 2;
     return base + growth;
 }
 
@@ -61,9 +61,11 @@ function showFraudWarning() {
     const warning = document.createElement('div');
     warning.id = 'fraud-warning';
     warning.className = 'fixed top-1/3 left-1/2 transform -translate-x-1/2 text-center z-50 pointer-events-none';
+    const spikeText = STATE.lastSpikeFraud === 0 ? 'DDoS INCOMING' : 'WEB FLOOD INCOMING';
+    const spikeMessage = STATE.lastSpikeFraud === 0 ? 'Prepare your defenses!' : 'Expect high web traffic!';
     warning.innerHTML = `
-        <div class="text-red-500 text-2xl font-bold animate-pulse">⚠️ DDoS INCOMING ⚠️</div>
-        <div class="text-red-300 text-sm">Fraud spike in 5 seconds!</div>
+        <div class="text-red-500 text-2xl font-bold animate-pulse">⚠️ ${spikeText} ⚠️</div>
+        <div class="text-red-300 text-sm"> ${spikeMessage} in 5 seconds!</div>
     `;
     document.body.appendChild(warning);
 
@@ -83,21 +85,30 @@ function startFraudSpike() {
     STATE.normalTrafficDist = { ...STATE.trafficDistribution };
 
     // Apply spike distribution
-    const fraudPct = CONFIG.survival.fraudSpike.fraudPercent;
-    const remaining = 1 - fraudPct;
-    STATE.trafficDistribution = {
-        WEB: remaining * 0.5,
-        API: remaining * 0.5,
-        FRAUD: fraudPct
-    };
+    if (STATE.lastSpikeFraud === 0) {
+        const fraudPct = CONFIG.survival.fraudSpike.fraudPercent;
+        const remaining = 1 - fraudPct;
+        STATE.trafficDistribution = {
+            WEB: remaining * 0.5,
+            API: remaining * 0.5,
+            FRAUD: fraudPct
+        };
+    } else {
+        STATE.trafficDistribution = {
+            WEB: 0.15,
+            API: 0.80,
+            FRAUD: 0.05
+        }
+    }
 
     // Visual indicator
+    const spikeType = STATE.lastSpikeFraud === 0 ? 'DDoS ATTACK ACTIVE' : 'WEB FLOOD ACTIVE';
     const indicator = document.createElement('div');
     indicator.id = 'fraud-spike-indicator';
     indicator.className = 'fixed top-4 left-1/2 transform -translate-x-1/2 z-40 pointer-events-none';
     indicator.innerHTML = `
         <div class="bg-red-900/80 border-2 border-red-500 rounded-lg px-4 py-2 animate-pulse">
-            <span class="text-red-400 font-bold">🔥 DDoS ATTACK ACTIVE 🔥</span>
+            <span class="text-red-400 font-bold">🔥 ${spikeType} 🔥</span>
         </div>
     `;
     document.body.appendChild(indicator);
@@ -123,7 +134,8 @@ function endFraudSpike() {
     // Reset mix display styling
     const fraudEl = document.getElementById('mix-fraud');
     if (fraudEl) fraudEl.className = 'text-purple-400';
-
+    STATE.lastSpikeFraud = 1 - STATE.lastSpikeFraud;
+    
     STATE.sound.playSuccess();
 }
 
@@ -217,7 +229,7 @@ function resetGame(mode = 'survival') {
         STATE.money = CONFIG.survival.startBudget;
         STATE.upkeepEnabled = true;
         STATE.trafficDistribution = { ...CONFIG.survival.trafficDistribution };
-        STATE.currentRPS = 0.5;
+        STATE.currentRPS = 2;
     }
 
     STATE.reputation = 100;
